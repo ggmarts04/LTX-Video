@@ -442,31 +442,52 @@ def infer(
 
     models_dir = "MODEL_DIR"
 
-    ltxv_model_name_or_path = pipeline_config["checkpoint_path"]
-    if not os.path.isfile(ltxv_model_name_or_path):
+    model_filename = pipeline_config["checkpoint_path"]
+    expected_model_path = os.path.join(models_dir, model_filename)
+
+    if os.path.isfile(expected_model_path):
+        ltxv_model_path = expected_model_path
+        logger.info(f"Found main model locally at: {ltxv_model_path}") # Use logger
+    elif os.path.isfile(model_filename):
+        ltxv_model_path = model_filename
+        logger.info(f"Found main model at absolute/current path: {ltxv_model_path}")
+    else:
+        logger.info(f"Main model '{model_filename}' not found locally. Attempting to download to '{models_dir}'...")
+        # Ensure models_dir exists if we are about to download into it
+        os.makedirs(models_dir, exist_ok=True)
         ltxv_model_path = hf_hub_download(
             repo_id="Lightricks/LTX-Video",
-            filename=ltxv_model_name_or_path,
+            filename=model_filename,
             local_dir=models_dir,
             repo_type="model",
+            local_dir_use_symlinks=False # Added for consistency
         )
-    else:
-        ltxv_model_path = ltxv_model_name_or_path
+        logger.info(f"Main model downloaded to: {ltxv_model_path}")
 
-    spatial_upscaler_model_name_or_path = pipeline_config.get(
-        "spatial_upscaler_model_path"
-    )
-    if spatial_upscaler_model_name_or_path and not os.path.isfile(
-        spatial_upscaler_model_name_or_path
-    ):
-        spatial_upscaler_model_path = hf_hub_download(
-            repo_id="Lightricks/LTX-Video",
-            filename=spatial_upscaler_model_name_or_path,
-            local_dir=models_dir,
-            repo_type="model",
-        )
+    spatial_upscaler_filename = pipeline_config.get("spatial_upscaler_model_path")
+    if spatial_upscaler_filename:
+        expected_spatial_upscaler_path = os.path.join(models_dir, spatial_upscaler_filename)
+        if os.path.isfile(expected_spatial_upscaler_path):
+            spatial_upscaler_model_path = expected_spatial_upscaler_path
+            logger.info(f"Found spatial upscaler model locally at: {spatial_upscaler_model_path}")
+        elif os.path.isfile(spatial_upscaler_filename):
+            spatial_upscaler_model_path = spatial_upscaler_filename
+            logger.info(f"Found spatial upscaler model at absolute/current path: {spatial_upscaler_model_path}")
+        else:
+            logger.info(f"Spatial upscaler model '{spatial_upscaler_filename}' not found locally. Attempting to download to '{models_dir}'...")
+            # Ensure models_dir exists
+            os.makedirs(models_dir, exist_ok=True)
+            spatial_upscaler_model_path = hf_hub_download(
+                repo_id="Lightricks/LTX-Video",
+                filename=spatial_upscaler_filename,
+                local_dir=models_dir,
+                repo_type="model",
+                local_dir_use_symlinks=False # Added for consistency
+            )
+            logger.info(f"Spatial upscaler model downloaded to: {spatial_upscaler_model_path}")
     else:
-        spatial_upscaler_model_path = spatial_upscaler_model_name_or_path
+        spatial_upscaler_model_path = None
+        logger.info("No spatial upscaler model configured.")
 
     if kwargs.get("input_image_path", None):
         logger.warning(
