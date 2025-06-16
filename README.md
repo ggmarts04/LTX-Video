@@ -1,6 +1,6 @@
 <div align="center">
 
-# LTX-Video
+# LTX-Video  
 
 This is the official repository for LTX-Video.
 
