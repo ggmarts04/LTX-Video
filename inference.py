@@ -14,6 +14,8 @@ import torch
 import cv2
 from safetensors import safe_open
 from PIL import Image
+import requests
+from io import BytesIO
 from transformers import (
     T5EncoderModel,
     T5Tokenizer,
@@ -43,6 +45,18 @@ MAX_WIDTH = 1280
 MAX_NUM_FRAMES = 257
 
 logger = logging.get_logger("LTX-Video")
+
+
+def download_image_from_url(url: str) -> Image.Image:
+    """Downloads an image from a URL and returns it as a PIL Image object."""
+    try:
+        response = requests.get(url, timeout=10) # Added timeout
+        response.raise_for_status()  # Raise an exception for bad status codes
+        image = Image.open(BytesIO(response.content)).convert("RGB")
+        return image
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error downloading image from {url}: {e}")
+        raise  # Re-raise the exception to be handled by the caller
 
 
 def get_total_gpu_memory():
@@ -75,11 +89,18 @@ def load_image_to_tensor_with_resize_and_crop(
         just_crop: If True, only crop the image to the target size without resizing
     """
     if isinstance(image_input, str):
-        image = Image.open(image_input).convert("RGB")
+        if image_input.startswith("http://") or image_input.startswith("https://"):
+            try:
+                image = download_image_from_url(image_input)
+            except Exception as e:
+                # Re-raise or handle as appropriate for the main script's error handling
+                raise ValueError(f"Failed to download or process image from URL: {image_input}") from e
+        else: # It's a file path
+            image = Image.open(image_input).convert("RGB")
     elif isinstance(image_input, Image.Image):
         image = image_input
     else:
-        raise ValueError("image_input must be either a file path or a PIL Image object")
+        raise ValueError("image_input must be either a file path, a URL, or a PIL Image object")
 
     input_width, input_height = image.size
     aspect_ratio_target = target_width / target_height
@@ -421,31 +442,52 @@ def infer(
 
     models_dir = "MODEL_DIR"
 
-    ltxv_model_name_or_path = pipeline_config["checkpoint_path"]
-    if not os.path.isfile(ltxv_model_name_or_path):
+    model_filename = pipeline_config["checkpoint_path"]
+    expected_model_path = os.path.join(models_dir, model_filename)
+
+    if os.path.isfile(expected_model_path):
+        ltxv_model_path = expected_model_path
+        logger.info(f"Found main model locally at: {ltxv_model_path}") # Use logger
+    elif os.path.isfile(model_filename):
+        ltxv_model_path = model_filename
+        logger.info(f"Found main model at absolute/current path: {ltxv_model_path}")
+    else:
+        logger.info(f"Main model '{model_filename}' not found locally. Attempting to download to '{models_dir}'...")
+        # Ensure models_dir exists if we are about to download into it
+        os.makedirs(models_dir, exist_ok=True)
         ltxv_model_path = hf_hub_download(
             repo_id="Lightricks/LTX-Video",
-            filename=ltxv_model_name_or_path,
+            filename=model_filename,
             local_dir=models_dir,
             repo_type="model",
+            local_dir_use_symlinks=False # Added for consistency
         )
-    else:
-        ltxv_model_path = ltxv_model_name_or_path
+        logger.info(f"Main model downloaded to: {ltxv_model_path}")
 
-    spatial_upscaler_model_name_or_path = pipeline_config.get(
-        "spatial_upscaler_model_path"
-    )
-    if spatial_upscaler_model_name_or_path and not os.path.isfile(
-        spatial_upscaler_model_name_or_path
-    ):
-        spatial_upscaler_model_path = hf_hub_download(
-            repo_id="Lightricks/LTX-Video",
-            filename=spatial_upscaler_model_name_or_path,
-            local_dir=models_dir,
-            repo_type="model",
-        )
+    spatial_upscaler_filename = pipeline_config.get("spatial_upscaler_model_path")
+    if spatial_upscaler_filename:
+        expected_spatial_upscaler_path = os.path.join(models_dir, spatial_upscaler_filename)
+        if os.path.isfile(expected_spatial_upscaler_path):
+            spatial_upscaler_model_path = expected_spatial_upscaler_path
+            logger.info(f"Found spatial upscaler model locally at: {spatial_upscaler_model_path}")
+        elif os.path.isfile(spatial_upscaler_filename):
+            spatial_upscaler_model_path = spatial_upscaler_filename
+            logger.info(f"Found spatial upscaler model at absolute/current path: {spatial_upscaler_model_path}")
+        else:
+            logger.info(f"Spatial upscaler model '{spatial_upscaler_filename}' not found locally. Attempting to download to '{models_dir}'...")
+            # Ensure models_dir exists
+            os.makedirs(models_dir, exist_ok=True)
+            spatial_upscaler_model_path = hf_hub_download(
+                repo_id="Lightricks/LTX-Video",
+                filename=spatial_upscaler_filename,
+                local_dir=models_dir,
+                repo_type="model",
+                local_dir_use_symlinks=False # Added for consistency
+            )
+            logger.info(f"Spatial upscaler model downloaded to: {spatial_upscaler_model_path}")
     else:
-        spatial_upscaler_model_path = spatial_upscaler_model_name_or_path
+        spatial_upscaler_model_path = None
+        logger.info("No spatial upscaler model configured.")
 
     if kwargs.get("input_image_path", None):
         logger.warning(
@@ -762,10 +804,23 @@ def load_media_file(
 
         # Stack frames along the temporal dimension
         media_tensor = torch.cat(frames, dim=2)
-    else:  # Input image
-        media_tensor = load_image_to_tensor_with_resize_and_crop(
-            media_path, height, width, just_crop=just_crop
-        )
+    else:  # Input image (can be path or URL)
+        if isinstance(media_path, str) and (media_path.startswith("http://") or media_path.startswith("https://")):
+            try:
+                image = download_image_from_url(media_path)
+                # Pass the PIL image directly
+                media_tensor = load_image_to_tensor_with_resize_and_crop(
+                    image, target_height=height, target_width=width, just_crop=just_crop
+                )
+            except Exception as e:
+                raise ValueError(f"Failed to download or process image from URL: {media_path}") from e
+        elif isinstance(media_path, str): # It's a file path
+            media_tensor = load_image_to_tensor_with_resize_and_crop(
+                media_path, target_height=height, target_width=width, just_crop=just_crop
+            )
+        else: # Should not happen if called from infer() but good for robustness
+            raise ValueError("media_path in load_media_file (for image) must be a file path or a URL string")
+
         media_tensor = torch.nn.functional.pad(media_tensor, padding)
     return media_tensor
 

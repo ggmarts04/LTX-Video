@@ -1,6 +1,6 @@
 <div align="center">
 
-# LTX-Video
+# LTX-Video  
 
 This is the official repository for LTX-Video.
 
@@ -207,6 +207,71 @@ To use our model with ComfyUI, please follow the instructions at [https://github
 To use our model with the Diffusers Python library, check out the [official documentation](https://huggingface.co/docs/diffusers/main/en/api/pipelines/ltx_video).
 
 Diffusers also support an 8-bit version of LTX-Video, [see details below](#ltx-videoq8)
+
+## Deploying on RunPod Serverless
+
+This repository has been configured to facilitate deployment on [RunPod Serverless](https://runpod.io/serverless-gpu).
+The following files have been added or modified:
+
+-   `handler.py`: The entry point for RunPod Serverless workers. It processes incoming job requests,
+    handles image URL inputs, manages conditioning parameters (keyframes), and invokes the
+    LTX Video inference pipeline using the `ltxv-13b-0.9.7-distilled.safetensors` model by default.
+-   `Dockerfile`: Defines the container image with all necessary dependencies. **The primary models (`ltxv-13b-0.9.7-distilled.safetensors` and `ltxv-spatial-upscaler-0.9.7.safetensors`) are pre-downloaded and included in this image.** This increases the overall image size but significantly improves cold start times for new serverless worker instances by eliminating on-demand model downloads.
+-   `requirements.txt`: A list of Python dependencies automatically generated from `pyproject.toml`,
+    used by the `Dockerfile` for setting up the environment.
+-   `inference.py`: Modified to accept image URLs as input for conditioning frames.
+
+### Deployment Steps (High-Level)
+
+1.  **Build the Docker Image**:
+    ```bash
+    docker build -t your-username/ltx-video-runpod .
+    ```
+2.  **Push the Image to a Container Registry**:
+    Push the built image to Docker Hub, AWS ECR, GCP Artifact Registry, or another registry
+    accessible by RunPod.
+    ```bash
+    docker push your-username/ltx-video-runpod
+    ```
+3.  **Create a RunPod Serverless Endpoint**:
+    -   Go to your RunPod Serverless dashboard.
+    -   Create a new Serverless Endpoint.
+    -   Point it to the Docker image you pushed (e.g., `your-username/ltx-video-runpod`).
+    -   Configure environment variables if necessary (though this setup aims to require minimal).
+    -   Set appropriate GPU requirements (e.g., RTX 3090 or higher, with sufficient VRAM for the 13B model).
+    -   Define the expected input JSON structure if prompted (refer to `handler.py` for the schema).
+
+4.  **Send Inference Requests**:
+    Once the endpoint is active, you can send POST requests to its API URL with a JSON payload like:
+    ```json
+    {
+      "input": {
+        "prompt": "A futuristic cityscape at sunset",
+        "conditioning_images": [
+          {
+            "url": "URL_TO_YOUR_FIRST_FRAME_IMAGE",
+            "start_frame": 0,
+            "strength": 1.0
+          }
+          // Add more conditioning images for keyframes if desired
+          // {
+          //   "url": "URL_TO_YOUR_LAST_FRAME_IMAGE",
+          //   "start_frame": 120, // Assuming 121 frames total, this is the last
+          //   "strength": 1.0
+          // }
+        ],
+        "height": 704,
+        "width": 1216,
+        "num_frames": 121,
+        "frame_rate": 30,
+        "negative_prompt": "blurry, low quality",
+        "seed": 42
+      }
+    }
+    ```
+    The service will return a JSON response containing the path to the generated video, which RunPod typically makes available via S3 or a direct download link.
+
+Refer to the official [RunPod Serverless documentation](https://docs.runpod.io/serverless/overview) for detailed instructions on creating and managing serverless endpoints.
 
 # Model User Guide
 
