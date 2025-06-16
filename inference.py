@@ -351,14 +351,45 @@ def create_ltx_video_pipeline(
             sampler=("Uniform" if sampler.lower() == "uniform" else "LinearQuadratic")
         )
 
-    text_encoder = T5EncoderModel.from_pretrained(
-        text_encoder_model_name_or_path, subfolder="text_encoder"
-    )
-    patchifier = SymmetricPatchifier(patch_size=1)
-    tokenizer = T5Tokenizer.from_pretrained(
-        text_encoder_model_name_or_path, subfolder="tokenizer"
-    )
+    # Logic for loading text encoder and tokenizer
+    # text_encoder_model_name_or_path is the original Hugging Face ID passed as an argument
+    orig_text_encoder_model_name_or_path = text_encoder_model_name_or_path
 
+    sanitized_repo_id = orig_text_encoder_model_name_or_path.replace('/', '_')
+    local_text_encoder_path = os.path.join('/app/text_encoder_models_cache', sanitized_repo_id)
+
+    actual_text_encoder_path_to_use = orig_text_encoder_model_name_or_path # Default to original HF ID
+
+    if os.path.isdir(local_text_encoder_path):
+        logger.info(f"Found pre-downloaded text encoder at: {local_text_encoder_path}")
+        actual_text_encoder_path_to_use = local_text_encoder_path
+    else:
+        logger.warning(
+            f"Pre-downloaded text encoder not found at {local_text_encoder_path}. "
+            f"Attempting to download from Hugging Face ID: {orig_text_encoder_model_name_or_path}"
+        )
+
+    try:
+        text_encoder = T5EncoderModel.from_pretrained(
+            actual_text_encoder_path_to_use, subfolder="text_encoder", local_files_only=os.path.isdir(actual_text_encoder_path_to_use)
+        )
+        tokenizer = T5Tokenizer.from_pretrained(
+            actual_text_encoder_path_to_use, subfolder="tokenizer", local_files_only=os.path.isdir(actual_text_encoder_path_to_use)
+        )
+    except Exception as e:
+        logger.error(f"Failed to load text encoder from {actual_text_encoder_path_to_use}: {e}")
+        if actual_text_encoder_path_to_use == local_text_encoder_path and local_text_encoder_path != orig_text_encoder_model_name_or_path:
+            logger.warning(f"Falling back to Hugging Face ID {orig_text_encoder_model_name_or_path} for text encoder after local failure.")
+            text_encoder = T5EncoderModel.from_pretrained(
+                orig_text_encoder_model_name_or_path, subfolder="text_encoder"
+            )
+            tokenizer = T5Tokenizer.from_pretrained(
+                orig_text_encoder_model_name_or_path, subfolder="tokenizer"
+            )
+        else:
+            raise
+
+    patchifier = SymmetricPatchifier(patch_size=1)
     transformer = transformer.to(device)
     vae = vae.to(device)
     text_encoder = text_encoder.to(device)
@@ -564,6 +595,8 @@ def infer(
         )
 
     precision = pipeline_config["precision"]
+    # text_encoder_model_name_or_path is passed to create_ltx_video_pipeline,
+    # keep it here as is, the logic will be handled inside create_ltx_video_pipeline
     text_encoder_model_name_or_path = pipeline_config["text_encoder_model_name_or_path"]
     sampler = pipeline_config["sampler"]
     prompt_enhancer_image_caption_model_name_or_path = pipeline_config[
