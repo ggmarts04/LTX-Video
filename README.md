@@ -1,6 +1,6 @@
 <div align="center">
 
-# LTX-Video  
+# LTX-Video
 
 This is the official repository for LTX-Video.
 
@@ -216,7 +216,7 @@ The following files have been added or modified:
 -   `handler.py`: The entry point for RunPod Serverless workers. It processes incoming job requests,
     handles image URL inputs, manages conditioning parameters (keyframes), and invokes the
     LTX Video inference pipeline using the `ltxv-13b-0.9.7-distilled.safetensors` model by default.
--   `Dockerfile`: Defines the container image with all necessary dependencies. **The primary models (`ltxv-13b-0.9.7-distilled.safetensors` and `ltxv-spatial-upscaler-0.9.7.safetensors`) are pre-downloaded and included in this image.** This increases the overall image size but significantly improves cold start times for new serverless worker instances by eliminating on-demand model downloads.
+-   `Dockerfile`: Defines the container image with all necessary dependencies. **The primary LTX Video models (`ltxv-13b-0.9.7-distilled.safetensors` and `ltxv-spatial-upscaler-0.9.7.safetensors`), as well as the required `PixArt-alpha/PixArt-XL-2-1024-MS` text encoder components, are pre-downloaded and included in this image.** This increases the overall image size but significantly improves cold start times and reliability by eliminating on-demand model downloads during worker initialization.
 -   `requirements.txt`: A list of Python dependencies automatically generated from `pyproject.toml`,
     used by the `Dockerfile` for setting up the environment.
 -   `inference.py`: Modified to accept image URLs as input for conditioning frames.
