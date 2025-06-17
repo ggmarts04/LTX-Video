@@ -13,3 +13,4 @@ opencv-python
 pytest
 requests
 runpod
+protobuf
